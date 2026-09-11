@@ -1,0 +1,77 @@
+# ==========================================
+# STAGE 1: Builder (Tải & Cài đặt dependencies)
+# ==========================================
+FROM python:3.12-slim-bookworm AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    UV_PYTHON_PREFERENCE=only-system
+
+# Cài đặt công cụ build cần thiết
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy uv binary
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /workspace
+
+# Tạo virtualenv tại /venv
+RUN uv venv /venv
+
+COPY pyproject.toml ./
+
+# Cài đặt gói phụ thuộc tối thiểu cho ONNX CPU
+RUN VIRTUAL_ENV=/venv uv pip install --no-cache \
+    onnxruntime \
+    sea-g2p>=0.7.20 \
+    numpy \
+    soundfile \
+    soxr \
+    tokenizers>=0.20 \
+    huggingface_hub \
+    PyYAML \
+    wyoming>=1.5.0
+
+COPY . .
+
+# Cài đặt dự án dạng no-deps
+RUN VIRTUAL_ENV=/venv uv pip install --no-deps -e .
+
+# Dọn dẹp cache pyc và test files trong venv để giảm dung lượng
+RUN find /venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+RUN find /venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+
+# ==========================================
+# STAGE 2: Runner (Image nhỏ gọn chạy thực tế)
+# ==========================================
+FROM python:3.12-slim-bookworm AS runner
+
+ENV PYTHONUNBUFFERED=1 \
+    HF_HOME=/models \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    VIRTUAL_ENV=/venv \
+    PATH="/venv/bin:$PATH" \
+    PYTHONPATH="/workspace/src:/workspace"
+
+# Cài thư viện runtime âm thanh (libsndfile1 cho soundfile/soxr)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy toàn bộ virtualenv và source code đã build từ Stage 1
+COPY --from=builder /venv /venv
+COPY --from=builder /workspace /workspace
+
+RUN mkdir -p /models
+
+EXPOSE 10500
+
+ENTRYPOINT ["python", "apps/wyoming_server.py"]
+CMD ["--uri", "tcp://0.0.0.0:10500", "--data-dir", "/models"]

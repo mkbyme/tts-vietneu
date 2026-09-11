@@ -1,6 +1,29 @@
 version: '3.8'
 
 services:
+  vieneu-wyoming-cpu:
+    image: mkbyme/vietneu-tss:2026.09-cpu
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    container_name: vieneu-wyoming
+    restart: unless-stopped
+    ports:
+      - "10500:10500"
+    environment:
+      TZ: "Asia/Saigon"
+      HF_HOME: "/models"
+      # Ép Hugging Face Hub không gửi bất kỳ HTTP request nào ra internet
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # Mount trực tiếp thư mục cache model trên host vào /models
+      - /opt/vieneu-models:/models
+    command: ["--uri", "tcp://0.0.0.0:10500", "--data-dir", "/models"]
+  
   vieneu-wyoming:
     # 1. BẮT BUỘC dùng image bản GPU
     image: ghcr.io/tritue2011/tts-vietneu-wyoming:gpu-latest
